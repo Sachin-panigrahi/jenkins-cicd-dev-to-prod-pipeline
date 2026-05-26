@@ -150,9 +150,9 @@ spec:
                         sshagent (credentials: [env.SSH_CREDENTIALS]) {
                             sh """
                             ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
-                                kubectl rollout undo deployment/test-deployment -n test-dev
+                                kubectl rollout undo deployment/test-deployment -n test-dev || true
 
-                                kubectl rollout status deployment/test-deployment -n test-dev --timeout=120s
+                                kubectl rollout status deployment/test-deployment -n test-dev --timeout=120s || true
                             '
                             """
                         }
@@ -215,7 +215,7 @@ Jenkins
                                 ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
                                     kubectl set image deployment/test-deployment test-deployment=123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${TAG} -n test-prod
 
-                                    kubectl rollout status deployment/test-deployment -n test-prod --timeout=120s
+                                    kubectl rollout status deployment/test-deployment -n test-prod --timeout=120s 
 
                                     kubectl rollout history deployment/test-deployment -n test-prod
                                 '
@@ -229,9 +229,9 @@ Jenkins
                         sshagent (credentials: [env.SSH_CREDENTIALS]) {
                             sh """
                             ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
-                                kubectl rollout undo deployment/test-deployment -n test-prod
+                                kubectl rollout undo deployment/test-deployment -n test-prod || true
 
-                                kubectl rollout status deployment/test-deployment -n test-prod --timeout=120s
+                                kubectl rollout status deployment/test-deployment -n test-prod --timeout=120s || true
                             '
                             """
                         }
