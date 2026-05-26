@@ -34,6 +34,15 @@ spec:
       command: ["/bin/sh"]
       tty: true
 
+    - name: trivy
+      image: aquasec/trivy:latest
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh"]
+      tty: true
+      volumeMounts:
+        - name: jenkins-docker-cfg
+          mountPath: /root/.docker
+
   nodeSelector:
     gpu: missing
 
@@ -86,11 +95,28 @@ spec:
                             --dockerfile Dockerfile \
                             --context ${pwd()} \
                             --verbosity debug \
-                            --insecure \
-                            --skip-tls-verify \
                             --destination 123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${BUILD_NUMBER}
                         """
                     }
+                }
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            when {
+                not {
+                    equals expected: 'prod', actual: params.ENV
+                }
+            }
+            steps {
+                container('trivy') {
+                    sh """
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 1 \
+                      --no-progress \
+                      123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${BUILD_NUMBER}
+                    """
                 }
             }
         }
@@ -102,10 +128,37 @@ spec:
                 }
             }
             steps {
-                sshagent (credentials: [env.SSH_CREDENTIALS]) {
-                    sh """
-                    ssh -o StrictHostKeyChecking=no $REMOTE_HOST 'kubectl set image deployment/test-deployment test-deployment=123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${BUILD_NUMBER} -n test-dev'
-                    """
+                script {
+                    try {
+                        sshagent (credentials: [env.SSH_CREDENTIALS]) {
+                            retry(3) {
+                                sh """
+                                ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
+                                    kubectl set image deployment/test-deployment test-deployment=123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${BUILD_NUMBER} -n test-dev
+
+                                    kubectl rollout status deployment/test-deployment -n test-dev --timeout=120s
+
+                                    kubectl rollout history deployment/test-deployment -n test-dev
+                                '
+                                """
+                            }
+                        }
+                    } catch (Exception e) {
+
+                        echo "Deployment failed. Rolling back..."
+
+                        sshagent (credentials: [env.SSH_CREDENTIALS]) {
+                            sh """
+                            ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
+                                kubectl rollout undo deployment/test-deployment -n test-dev
+
+                                kubectl rollout status deployment/test-deployment -n test-dev --timeout=120s
+                            '
+                            """
+                        }
+
+                        error("Deployment failed and rollback executed.")
+                    }
                 }
             }
         }
@@ -154,9 +207,38 @@ Jenkins
                 }
             }
             steps {
-              container('kubectl') {
-                sh 'kubectl set image deployment/test-deployment test-deployment=123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${TAG} -n test-prod'
-              }
+                script {
+                    try {
+                        sshagent (credentials: [env.SSH_CREDENTIALS]) {
+                            retry(3) {
+                                sh """
+                                ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
+                                    kubectl set image deployment/test-deployment test-deployment=123456789102.dkr.ecr.us-east-1.amazonaws.com/test-deployment:${TAG} -n test-prod
+
+                                    kubectl rollout status deployment/test-deployment -n test-prod --timeout=120s
+
+                                    kubectl rollout history deployment/test-deployment -n test-prod
+                                '
+                                """
+                            }
+                        }
+                    } catch (Exception e) {
+
+                        echo "Production deployment failed. Rolling back..."
+
+                        sshagent (credentials: [env.SSH_CREDENTIALS]) {
+                            sh """
+                            ssh -o StrictHostKeyChecking=no $REMOTE_HOST '
+                                kubectl rollout undo deployment/test-deployment -n test-prod
+
+                                kubectl rollout status deployment/test-deployment -n test-prod --timeout=120s
+                            '
+                            """
+                        }
+
+                        error("Production deployment failed and rollback executed.")
+                    }
+                }
             }
         }
 
